@@ -16,6 +16,9 @@ const Index = () => {
     timeMs: 0,
     miles: 0,
     bestMiles: Number(typeof window !== "undefined" ? localStorage.getItem("rex-rush-best") || 0 : 0),
+    hearts: 3,
+    maxHearts: 3,
+    invulnMs: 0,
   });
 
   useEffect(() => {
