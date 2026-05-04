@@ -1,5 +1,5 @@
 import type { GameState } from "@/game/engine";
-import { Apple, Sparkles, RotateCcw } from "lucide-react";
+import { Apple, Sparkles, RotateCcw, Heart } from "lucide-react";
 
 interface Props {
   state: GameState;
@@ -29,7 +29,8 @@ export const GameHUD = ({ state }: Props) => {
         </div>
       </div>
 
-      <div className="hud-panel flex items-center gap-2 rounded-2xl px-3 py-2 sm:px-4 sm:py-3">
+      <div className="hud-panel flex flex-col items-center gap-2 rounded-2xl px-3 py-2 sm:px-4 sm:py-3">
+        <Hearts state={state} />
         <ModeBadge state={state} />
       </div>
 
@@ -49,11 +50,18 @@ export const GameHUD = ({ state }: Props) => {
             color="hsl(295,65%,55%)"
           />
         )}
-        {state.mode === "sky" && (
+        {(state.mode === "sky" || state.mode === "space") && (
           <PowerChip
             icon={<Sparkles className="h-3.5 w-3.5" />}
-            label="Dragon"
+            label={state.mode === "space" ? "Space" : "Dragon"}
             color="hsl(48,95%,55%)"
+          />
+        )}
+        {state.mode === "cave" && (
+          <PowerChip
+            icon={<Sparkles className="h-3.5 w-3.5" />}
+            label="Cave"
+            color="hsl(295,65%,55%)"
           />
         )}
         {state.lowGravityMs === 0 && !state.reversed && state.mode === "land" && (
