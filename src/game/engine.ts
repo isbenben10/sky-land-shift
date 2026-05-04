@@ -20,7 +20,7 @@ type Particle = {
   x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number;
 };
 
-type Fruit = { x: number; y: number; r: number; kind: FruitKind; bob: number };
+type Fruit = { x: number; y: number; r: number; kind: FruitKind; bob: number; _eaten?: boolean };
 type Obstacle = { x: number; y: number; w: number; h: number; kind: ObstacleKind; lane?: 0 | 1 };
 
 const GROUND_RATIO = 0.78; // ground y as fraction of canvas height
@@ -854,8 +854,3 @@ export class Engine {
   }
 }
 
-// Augment Fruit type with eaten flag at runtime
-declare module "./engine" {
-  interface FruitMarker { _eaten?: boolean }
-}
-type _F = Fruit & { _eaten?: boolean };
