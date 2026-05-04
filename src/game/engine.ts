@@ -1,19 +1,31 @@
 import { sfx } from "./sounds";
 
 // ---------- Types ----------
-export type Mode = "land" | "sky";
+export type Mode = "land" | "sky" | "cave" | "space";
 export type FruitKind = "apple" | "pineapple" | "durian" | "mushroom";
-export type ObstacleKind = "tree" | "hole" | "cloud" | "bird" | "skyhole";
+export type ObstacleKind =
+  | "tree"
+  | "hole"
+  | "cloud"
+  | "bird"
+  | "skyhole"
+  | "spike"
+  | "star"
+  | "portal-land"
+  | "portal-sky";
 
 export type GameState = {
   running: boolean;
   gameOver: boolean;
   mode: Mode;
   reversed: boolean;
-  lowGravityMs: number; // remaining ms
+  lowGravityMs: number;
   timeMs: number;
   miles: number;
   bestMiles: number;
+  hearts: number;
+  maxHearts: number;
+  invulnMs: number;
 };
 
 type Particle = {
@@ -23,25 +35,30 @@ type Particle = {
 type Fruit = { x: number; y: number; r: number; kind: FruitKind; bob: number; _eaten?: boolean };
 type Obstacle = { x: number; y: number; w: number; h: number; kind: ObstacleKind; lane?: 0 | 1 };
 
-const GROUND_RATIO = 0.78; // ground y as fraction of canvas height
+const GROUND_RATIO = 0.78;
 const PLAYER_X_RATIO = 0.18;
-const BASE_SPEED = 360; // px/sec at start
-const SPEED_GROWTH = 8; // px/sec per second survived
+const BASE_SPEED = 360;
+const SPEED_GROWTH = 8;
 const MAX_SPEED = 900;
 const NORMAL_GRAVITY = 2200;
 const LOW_GRAVITY = 900;
 const JUMP_VELOCITY = -780;
 const JUMP_VELOCITY_LOW = -640;
 
-// Fruit/obstacle spawn cadence
-const MIN_SPAWN_GAP = 0.55; // seconds, scaled by speed
+const MIN_SPAWN_GAP = 0.55;
 const FRUIT_CHANCE = 0.32;
 
-// ---------- Utility ----------
+const MAX_HEARTS = 3;
+const INVULN_MS = 1400;
+
+// Modes that use ground-based physics (gravity + jump)
+const isGroundMode = (m: Mode) => m === "land" || m === "cave";
+// Modes that use lane-switching
+const isLaneMode = (m: Mode) => m === "sky" || m === "space";
+
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
 
-// ---------- Engine ----------
 export type EngineCallbacks = {
   onState: (s: GameState) => void;
 };
@@ -52,17 +69,14 @@ export class Engine {
   private cb: EngineCallbacks;
   private raf = 0;
   private lastTs = 0;
-  private acc = 0;
 
-  // Player
   private px = 0;
   private py = 0;
   private vy = 0;
   private onGround = true;
-  private skyLane: 0 | 1 = 1; // 0 = upper, 1 = lower
+  private skyLane: 0 | 1 = 1;
   private skyTargetY = 0;
 
-  // World
   private speed = BASE_SPEED;
   private worldOffset = 0;
   private bgOffset1 = 0;
@@ -72,8 +86,10 @@ export class Engine {
   private obstacles: Obstacle[] = [];
   private particles: Particle[] = [];
   private spawnTimer = 0;
+  // Counts of obstacles spawned in current zone — used to schedule a return portal
+  private zoneSpawnCount = 0;
+  private portalQueued = false;
 
-  // Player visual state
   private bodyTilt = 0;
   private legPhase = 0;
   private wingPhase = 0;
@@ -89,6 +105,9 @@ export class Engine {
     timeMs: 0,
     miles: 0,
     bestMiles: 0,
+    hearts: MAX_HEARTS,
+    maxHearts: MAX_HEARTS,
+    invulnMs: 0,
   };
 
   constructor(canvas: HTMLCanvasElement, cb: EngineCallbacks) {
@@ -123,6 +142,8 @@ export class Engine {
     this.bgOffset1 = 0;
     this.bgOffset2 = 0;
     this.skyLane = 1;
+    this.zoneSpawnCount = 0;
+    this.portalQueued = false;
     this.state = {
       ...this.state,
       running: true,
@@ -132,13 +153,15 @@ export class Engine {
       lowGravityMs: 0,
       timeMs: 0,
       miles: 0,
+      hearts: MAX_HEARTS,
+      maxHearts: MAX_HEARTS,
+      invulnMs: 0,
     };
     const h = this.cssHeight();
     this.py = h * GROUND_RATIO - this.playerHeight();
     this.vy = 0;
     this.onGround = true;
     this.lastTs = performance.now();
-    this.acc = 0;
     cancelAnimationFrame(this.raf);
     this.raf = requestAnimationFrame(this.loop);
     this.cb.onState({ ...this.state });
@@ -153,34 +176,30 @@ export class Engine {
     cancelAnimationFrame(this.raf);
   };
 
-  // ---------- Input ----------
   press = () => {
     if (!this.state.running || this.state.gameOver) return;
-    if (this.state.mode === "land") {
+    if (isGroundMode(this.state.mode)) {
       if (this.onGround) {
         this.vy = this.state.lowGravityMs > 0 ? JUMP_VELOCITY_LOW : JUMP_VELOCITY;
         this.onGround = false;
         sfx.jump();
       }
     } else {
-      // toggle sky lane
       this.skyLane = this.skyLane === 0 ? 1 : 0;
       sfx.jump();
     }
   };
 
-  // ---------- Dimensions ----------
   private cssWidth() { return this.canvas.clientWidth; }
   private cssHeight() { return this.canvas.clientHeight; }
-  private playerWidth() { return this.state.mode === "land" ? 56 : 70; }
-  private playerHeight() { return this.state.mode === "land" ? 60 : 46; }
+  private playerWidth() { return isGroundMode(this.state.mode) ? 56 : 70; }
+  private playerHeight() { return isGroundMode(this.state.mode) ? 60 : 46; }
   private groundY() { return this.cssHeight() * GROUND_RATIO; }
   private skyLaneY(lane: 0 | 1) {
     const h = this.cssHeight();
     return lane === 0 ? h * 0.28 : h * 0.58;
   }
 
-  // ---------- Loop ----------
   private loop = (ts: number) => {
     const dt = Math.min(0.033, (ts - this.lastTs) / 1000);
     this.lastTs = ts;
@@ -192,27 +211,25 @@ export class Engine {
   };
 
   private update(dt: number) {
-    // Time + miles (60 miles per minute = 1 mile/sec)
     this.state.timeMs += dt * 1000;
     this.state.miles = this.state.timeMs / 1000;
 
-    // Difficulty
     this.speed = Math.min(MAX_SPEED, BASE_SPEED + SPEED_GROWTH * (this.state.timeMs / 1000));
 
-    // Low gravity countdown
     if (this.state.lowGravityMs > 0) {
       this.state.lowGravityMs = Math.max(0, this.state.lowGravityMs - dt * 1000);
     }
+    if (this.state.invulnMs > 0) {
+      this.state.invulnMs = Math.max(0, this.state.invulnMs - dt * 1000);
+    }
 
-    // Background parallax
     const dir = this.state.reversed ? -1 : 1;
     this.bgOffset1 = (this.bgOffset1 + this.speed * 0.25 * dt * dir) % 10000;
     this.bgOffset2 = (this.bgOffset2 + this.speed * 0.55 * dt * dir) % 10000;
     this.worldOffset += this.speed * dt * dir;
 
-    // Player physics
     this.px = this.cssWidth() * PLAYER_X_RATIO;
-    if (this.state.mode === "land") {
+    if (isGroundMode(this.state.mode)) {
       const g = this.state.lowGravityMs > 0 ? LOW_GRAVITY : NORMAL_GRAVITY;
       this.vy += g * dt;
       this.py += this.vy * dt;
@@ -231,7 +248,6 @@ export class Engine {
       this.bodyTilt = Math.sin(this.wingPhase) * 0.06;
     }
 
-    // Spawn
     this.spawnTimer -= dt;
     const speedFactor = BASE_SPEED / this.speed;
     if (this.spawnTimer <= 0) {
@@ -239,18 +255,15 @@ export class Engine {
       this.spawnTimer = rand(MIN_SPAWN_GAP, 1.4) * speedFactor;
     }
 
-    // Move world entities
     const dx = this.speed * dt * dir;
     for (const o of this.obstacles) o.x -= dx;
     for (const f of this.fruits) { f.x -= dx; f.bob += dt; }
 
-    // Cull
     const margin = 200;
     const w = this.cssWidth();
     this.obstacles = this.obstacles.filter((o) => o.x + o.w > -margin && o.x < w + margin * 3);
     this.fruits = this.fruits.filter((f) => f.x + f.r > -margin && f.x < w + margin * 3);
 
-    // Particles
     for (const p of this.particles) {
       p.vy += 600 * dt;
       p.x += p.vx * dt;
@@ -261,10 +274,8 @@ export class Engine {
 
     if (this.flashMs > 0) this.flashMs -= dt * 1000;
 
-    // Collisions
     this.checkCollisions();
 
-    // Emit state ~ every frame (cheap)
     this.cb.onState({ ...this.state });
   }
 
@@ -272,9 +283,36 @@ export class Engine {
     const w = this.cssWidth();
     const dir = this.state.reversed ? -1 : 1;
     const spawnX = dir > 0 ? w + 60 : -120;
+    const mode = this.state.mode;
 
-    if (this.state.mode === "land") {
-      // Fruit or obstacle
+    this.zoneSpawnCount += 1;
+
+    // After enough obstacles in cave/space, queue a return portal
+    if (!this.portalQueued && (mode === "cave" || mode === "space") && this.zoneSpawnCount >= 6) {
+      this.portalQueued = true;
+      if (mode === "cave") {
+        this.obstacles.push({
+          x: spawnX,
+          y: this.groundY() - 80,
+          w: 60,
+          h: 80,
+          kind: "portal-land",
+        });
+      } else {
+        const lane: 0 | 1 = Math.random() < 0.5 ? 0 : 1;
+        this.obstacles.push({
+          x: spawnX,
+          y: this.skyLaneY(lane) - 38,
+          w: 70,
+          h: 76,
+          kind: "portal-sky",
+          lane,
+        });
+      }
+      return;
+    }
+
+    if (mode === "land") {
       if (Math.random() < FRUIT_CHANCE) {
         const kind = pick<FruitKind>(["apple", "apple", "pineapple", "mushroom"]);
         const y = this.groundY() - rand(60, 160);
@@ -282,16 +320,29 @@ export class Engine {
       } else {
         const r = Math.random();
         if (r < 0.6) {
-          // tree
           const h = rand(40, 75);
           this.obstacles.push({ x: spawnX, y: this.groundY() - h, w: 26, h, kind: "tree" });
         } else {
-          // hole
           const ww = rand(50, 90);
           this.obstacles.push({ x: spawnX, y: this.groundY(), w: ww, h: 30, kind: "hole" });
         }
       }
-    } else {
+    } else if (mode === "cave") {
+      if (Math.random() < FRUIT_CHANCE) {
+        const kind = pick<FruitKind>(["apple", "apple", "mushroom", "pineapple"]);
+        const y = this.groundY() - rand(60, 150);
+        this.fruits.push({ x: spawnX, y, r: 16, kind, bob: Math.random() * 6 });
+      } else {
+        const h = rand(28, 44);
+        this.obstacles.push({
+          x: spawnX,
+          y: this.groundY() - h,
+          w: rand(22, 40),
+          h,
+          kind: "spike",
+        });
+      }
+    } else if (mode === "sky") {
       if (Math.random() < FRUIT_CHANCE) {
         const kind = pick<FruitKind>(["durian", "durian", "mushroom", "apple"]);
         const lane: 0 | 1 = Math.random() < 0.5 ? 0 : 1;
@@ -308,6 +359,16 @@ export class Engine {
           this.obstacles.push({ x: spawnX, y: y - 30, w: 90, h: 60, kind: "skyhole", lane });
         }
       }
+    } else if (mode === "space") {
+      if (Math.random() < FRUIT_CHANCE) {
+        const kind = pick<FruitKind>(["durian", "mushroom", "apple"]);
+        const lane: 0 | 1 = Math.random() < 0.5 ? 0 : 1;
+        this.fruits.push({ x: spawnX, y: this.skyLaneY(lane), r: 16, kind, bob: 0 });
+      } else {
+        const lane: 0 | 1 = Math.random() < 0.5 ? 0 : 1;
+        const y = this.skyLaneY(lane);
+        this.obstacles.push({ x: spawnX, y: y - 18, w: 36, h: 36, kind: "star", lane });
+      }
     }
   }
 
@@ -316,7 +377,6 @@ export class Engine {
   }
 
   private intersects(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) {
-    // shrink hitboxes a bit for fairness
     const pad = 6;
     return (
       a.x + pad < b.x + b.w - pad &&
@@ -328,7 +388,7 @@ export class Engine {
 
   private checkCollisions() {
     const pr = this.playerRect();
-    // Fruits
+
     for (const f of this.fruits) {
       const fr = { x: f.x - f.r, y: f.y - f.r, w: f.r * 2, h: f.r * 2 };
       if (this.intersects(pr, fr)) {
@@ -337,25 +397,33 @@ export class Engine {
     }
     this.fruits = this.fruits.filter((f) => !f._eaten);
 
-    // Obstacles
     for (const o of this.obstacles) {
       if (o.kind === "hole") {
-        // only collides if player is on ground over hole
         if (this.state.mode === "land" && this.onGround) {
           const feet = { x: pr.x + 8, y: pr.y + pr.h - 4, w: pr.w - 16, h: 8 };
           const top = { x: o.x, y: o.y - 2, w: o.w, h: 8 };
-          if (this.intersects(feet, top)) return this.die();
+          if (this.intersects(feet, top)) return this.enterCave();
         }
       } else if (o.kind === "skyhole") {
         if (this.state.mode === "sky" && o.lane === this.skyLane) {
-          if (this.intersects(pr, o)) return this.die();
+          if (this.intersects(pr, o)) return this.enterSpace();
         }
+      } else if (o.kind === "portal-land") {
+        if (this.state.mode === "cave" && this.intersects(pr, o)) return this.exitToLand();
+      } else if (o.kind === "portal-sky") {
+        if (this.state.mode === "space" && o.lane === this.skyLane && this.intersects(pr, o)) return this.exitToSky();
       } else if (o.kind === "cloud" || o.kind === "bird") {
         if (this.state.mode === "sky" && o.lane === this.skyLane) {
-          if (this.intersects(pr, o)) return this.die();
+          if (this.intersects(pr, o)) return this.takeHit();
+        }
+      } else if (o.kind === "star") {
+        if (this.state.mode === "space" && o.lane === this.skyLane) {
+          if (this.intersects(pr, o)) return this.takeHit();
         }
       } else if (o.kind === "tree") {
-        if (this.state.mode === "land" && this.intersects(pr, o)) return this.die();
+        if (this.state.mode === "land" && this.intersects(pr, o)) return this.takeHit();
+      } else if (o.kind === "spike") {
+        if (this.state.mode === "cave" && this.intersects(pr, o)) return this.takeHit();
       }
     }
   }
@@ -370,25 +438,29 @@ export class Engine {
         this.flash("hsla(355,80%,55%,0.25)");
         break;
       case "pineapple":
-        if (this.state.mode === "land") {
+        if (isGroundMode(this.state.mode)) {
           this.state.mode = "sky";
           this.skyLane = 1;
           this.py = this.skyLaneY(1) - this.playerHeight() / 2;
           this.vy = 0;
           this.obstacles = [];
           this.fruits = [];
+          this.zoneSpawnCount = 0;
+          this.portalQueued = false;
           sfx.transform();
           this.flash("hsla(48,95%,55%,0.35)");
         }
         break;
       case "durian":
-        if (this.state.mode === "sky") {
+        if (isLaneMode(this.state.mode)) {
           this.state.mode = "land";
           this.py = this.groundY() - this.playerHeight();
           this.vy = 0;
           this.onGround = true;
           this.obstacles = [];
           this.fruits = [];
+          this.zoneSpawnCount = 0;
+          this.portalQueued = false;
           sfx.transform();
           this.flash("hsla(75,55%,45%,0.35)");
         }
@@ -399,6 +471,64 @@ export class Engine {
         this.flash("hsla(295,65%,55%,0.3)");
         break;
     }
+  }
+
+  // ---------- Zone transitions ----------
+  private enterCave() {
+    this.state.mode = "cave";
+    this.obstacles = [];
+    this.fruits = [];
+    this.zoneSpawnCount = 0;
+    this.portalQueued = false;
+    this.py = this.groundY() - this.playerHeight();
+    this.vy = 0;
+    this.onGround = true;
+    this.state.invulnMs = 800;
+    sfx.transform();
+    this.flash("hsla(20,40%,8%,0.55)");
+    this.spawnParticles(this.px + 28, this.py + 30, "hsl(295,65%,55%)", 22);
+  }
+
+  private exitToLand() {
+    this.state.mode = "land";
+    this.obstacles = [];
+    this.fruits = [];
+    this.zoneSpawnCount = 0;
+    this.portalQueued = false;
+    this.py = this.groundY() - this.playerHeight();
+    this.vy = 0;
+    this.onGround = true;
+    this.state.invulnMs = 800;
+    sfx.transform();
+    this.flash("hsla(48,95%,70%,0.4)");
+    this.spawnParticles(this.px + 28, this.py + 30, "hsl(48,95%,55%)", 22);
+  }
+
+  private enterSpace() {
+    this.state.mode = "space";
+    this.obstacles = [];
+    this.fruits = [];
+    this.zoneSpawnCount = 0;
+    this.portalQueued = false;
+    this.skyLane = 1;
+    this.py = this.skyLaneY(1) - this.playerHeight() / 2;
+    this.state.invulnMs = 800;
+    sfx.transform();
+    this.flash("hsla(240,80%,10%,0.55)");
+    this.spawnParticles(this.px + 28, this.py + 20, "hsl(280,80%,70%)", 22);
+  }
+
+  private exitToSky() {
+    this.state.mode = "sky";
+    this.obstacles = [];
+    this.fruits = [];
+    this.zoneSpawnCount = 0;
+    this.portalQueued = false;
+    this.py = this.skyLaneY(this.skyLane) - this.playerHeight() / 2;
+    this.state.invulnMs = 800;
+    sfx.transform();
+    this.flash("hsla(320,80%,70%,0.4)");
+    this.spawnParticles(this.px + 28, this.py + 20, "hsl(320,80%,70%)", 22);
   }
 
   private fruitColor(k: FruitKind) {
@@ -431,10 +561,30 @@ export class Engine {
     this.flashColor = color;
   }
 
+  private takeHit() {
+    if (this.state.invulnMs > 0 || this.state.gameOver) return;
+    this.state.hearts -= 1;
+    this.state.invulnMs = INVULN_MS;
+    this.flash("hsla(0,80%,55%,0.35)");
+    this.spawnParticles(
+      this.px + this.playerWidth() / 2,
+      this.py + this.playerHeight() / 2,
+      "hsl(0,80%,60%)",
+      18
+    );
+    sfx.jump();
+    if (this.state.hearts <= 0) {
+      this.die();
+    } else {
+      this.cb.onState({ ...this.state });
+    }
+  }
+
   private die() {
     if (this.state.gameOver) return;
     this.state.gameOver = true;
     this.state.running = false;
+    this.state.hearts = 0;
     if (this.state.miles > this.state.bestMiles) {
       this.state.bestMiles = this.state.miles;
       try { localStorage.setItem("rex-rush-best", String(this.state.bestMiles)); } catch {}
@@ -452,22 +602,21 @@ export class Engine {
     ctx.clearRect(0, 0, w, h);
 
     if (this.state.mode === "land") this.drawLandBg(w, h);
-    else this.drawSkyBg(w, h);
+    else if (this.state.mode === "cave") this.drawCaveBg(w, h);
+    else if (this.state.mode === "sky") this.drawSkyBg(w, h);
+    else this.drawSpaceBg(w, h);
 
-    // Reverse tint overlay
     if (this.state.reversed) {
       ctx.fillStyle = "hsla(280,80%,50%,0.12)";
       ctx.fillRect(0, 0, w, h);
     }
 
-    // Entities
-    if (this.state.mode === "land") this.drawGround(w, h);
+    if (isGroundMode(this.state.mode)) this.drawGround(w, h);
     this.drawObstacles();
     this.drawFruits();
     this.drawPlayer();
     this.drawParticles();
 
-    // Flash
     if (this.flashMs > 0) {
       ctx.fillStyle = this.flashColor;
       ctx.fillRect(0, 0, w, h);
@@ -482,13 +631,11 @@ export class Engine {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
 
-    // Sun
     ctx.fillStyle = "hsla(45,100%,70%,0.9)";
     ctx.beginPath();
     ctx.arc(w * 0.78, h * 0.25, 50, 0, Math.PI * 2);
     ctx.fill();
 
-    // Distant mountains (parallax slow)
     const off1 = ((this.bgOffset1 % 600) + 600) % 600;
     ctx.fillStyle = "hsla(260,30%,55%,0.45)";
     for (let i = -1; i < Math.ceil(w / 300) + 2; i++) {
@@ -501,13 +648,47 @@ export class Engine {
       ctx.fill();
     }
 
-    // Closer hills (parallax faster)
     const off2 = ((this.bgOffset2 % 400) + 400) % 400;
     ctx.fillStyle = "hsla(140,40%,40%,0.55)";
     for (let i = -1; i < Math.ceil(w / 200) + 2; i++) {
       const x = i * 200 - off2;
       ctx.beginPath();
       ctx.arc(x + 100, h * GROUND_RATIO + 10, 110, Math.PI, 0);
+      ctx.fill();
+    }
+  }
+
+  private drawCaveBg(w: number, h: number) {
+    const { ctx } = this;
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, "hsl(260,40%,10%)");
+    grad.addColorStop(1, "hsl(280,35%,18%)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Crystals/glow specks
+    const off1 = ((this.bgOffset1 % 800) + 800) % 800;
+    for (let i = 0; i < 30; i++) {
+      const baseX = (i * 173) % 800;
+      const x = ((baseX - off1) % 800 + 800) % 800 + Math.floor(i / 6) * 800 - 400;
+      const y = (i * 71) % (h * GROUND_RATIO - 40) + 20;
+      ctx.fillStyle = i % 3 === 0 ? "hsla(295,80%,65%,0.6)" : "hsla(200,80%,70%,0.4)";
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Stalactites
+    const off2 = ((this.bgOffset2 % 180) + 180) % 180;
+    ctx.fillStyle = "hsl(270,30%,14%)";
+    for (let i = -1; i < Math.ceil(w / 90) + 2; i++) {
+      const x = i * 90 - off2;
+      const sh = 30 + ((i * 17) % 25);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + 18, 0);
+      ctx.lineTo(x + 9, sh);
+      ctx.closePath();
       ctx.fill();
     }
   }
@@ -520,7 +701,6 @@ export class Engine {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
 
-    // Stars
     ctx.fillStyle = "hsla(0,0%,100%,0.85)";
     const off1 = ((this.bgOffset1 % 800) + 800) % 800;
     for (let i = 0; i < 40; i++) {
@@ -529,8 +709,44 @@ export class Engine {
       ctx.fillRect(x, y, 2, 2);
     }
 
-    // Lane guides
     ctx.strokeStyle = "hsla(0,0%,100%,0.12)";
+    ctx.setLineDash([10, 14]);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.28);
+    ctx.lineTo(w, h * 0.28);
+    ctx.moveTo(0, h * 0.58);
+    ctx.lineTo(w, h * 0.58);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  private drawSpaceBg(w: number, h: number) {
+    const { ctx } = this;
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, "hsl(240,60%,6%)");
+    grad.addColorStop(1, "hsl(260,70%,12%)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Distant nebula glow
+    const ng = ctx.createRadialGradient(w * 0.7, h * 0.3, 10, w * 0.7, h * 0.3, w * 0.5);
+    ng.addColorStop(0, "hsla(280,80%,40%,0.4)");
+    ng.addColorStop(1, "hsla(240,80%,20%,0)");
+    ctx.fillStyle = ng;
+    ctx.fillRect(0, 0, w, h);
+
+    // Tiny background stars (don't hurt)
+    ctx.fillStyle = "hsla(0,0%,100%,0.7)";
+    const off1 = ((this.bgOffset1 % 800) + 800) % 800;
+    for (let i = 0; i < 60; i++) {
+      const x = ((i * 137) % 800 - off1 + 800) % 800 + (Math.floor(i / 5) * 800) - 400;
+      const y = (i * 53) % h;
+      ctx.fillRect(x, y, 1, 1);
+    }
+
+    // Lane guides
+    ctx.strokeStyle = "hsla(280,80%,80%,0.15)";
     ctx.setLineDash([10, 14]);
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -545,24 +761,27 @@ export class Engine {
   private drawGround(w: number, h: number) {
     const { ctx } = this;
     const gy = this.groundY();
-    // Track
+    const isCave = this.state.mode === "cave";
     const trackGrad = ctx.createLinearGradient(0, gy, 0, h);
-    trackGrad.addColorStop(0, "hsl(32,55%,45%)");
-    trackGrad.addColorStop(1, "hsl(28,45%,30%)");
+    if (isCave) {
+      trackGrad.addColorStop(0, "hsl(270,30%,20%)");
+      trackGrad.addColorStop(1, "hsl(270,35%,10%)");
+    } else {
+      trackGrad.addColorStop(0, "hsl(32,55%,45%)");
+      trackGrad.addColorStop(1, "hsl(28,45%,30%)");
+    }
     ctx.fillStyle = trackGrad;
     ctx.fillRect(0, gy, w, h - gy);
 
-    // Top line
-    ctx.strokeStyle = "hsl(28,45%,25%)";
+    ctx.strokeStyle = isCave ? "hsl(280,40%,8%)" : "hsl(28,45%,25%)";
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(0, gy);
     ctx.lineTo(w, gy);
     ctx.stroke();
 
-    // Dashes
     const off = ((this.worldOffset % 60) + 60) % 60;
-    ctx.fillStyle = "hsla(45,90%,80%,0.7)";
+    ctx.fillStyle = isCave ? "hsla(295,80%,70%,0.55)" : "hsla(45,90%,80%,0.7)";
     for (let i = -1; i < Math.ceil(w / 60) + 2; i++) {
       ctx.fillRect(i * 60 - off, gy + 14, 30, 4);
     }
@@ -573,10 +792,8 @@ export class Engine {
     for (const o of this.obstacles) {
       ctx.save();
       if (o.kind === "tree") {
-        // trunk
         ctx.fillStyle = "hsl(24,55%,25%)";
         ctx.fillRect(o.x + o.w / 2 - 4, o.y + o.h - 18, 8, 18);
-        // foliage
         ctx.fillStyle = "hsl(140,60%,35%)";
         ctx.beginPath();
         ctx.arc(o.x + o.w / 2, o.y + 14, 18, 0, Math.PI * 2);
@@ -587,13 +804,53 @@ export class Engine {
         ctx.arc(o.x + o.w / 2 + 8, o.y + 22, 12, 0, Math.PI * 2);
         ctx.fill();
       } else if (o.kind === "hole") {
-        // dark trench
         ctx.fillStyle = "hsl(20,40%,12%)";
         ctx.beginPath();
         ctx.ellipse(o.x + o.w / 2, o.y + 4, o.w / 2, 10, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = "hsl(20,40%,8%)";
         ctx.fillRect(o.x, o.y + 4, o.w, 30);
+        // Glowing rim hint of teleport
+        ctx.strokeStyle = "hsla(295,80%,65%,0.7)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(o.x + o.w / 2, o.y + 4, o.w / 2, 10, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (o.kind === "spike") {
+        // upward triangle spike from ground
+        ctx.fillStyle = "hsl(0,0%,75%)";
+        ctx.beginPath();
+        ctx.moveTo(o.x, o.y + o.h);
+        ctx.lineTo(o.x + o.w / 2, o.y);
+        ctx.lineTo(o.x + o.w, o.y + o.h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "hsl(0,0%,40%)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // base
+        ctx.fillStyle = "hsl(270,30%,18%)";
+        ctx.fillRect(o.x - 2, o.y + o.h - 4, o.w + 4, 6);
+      } else if (o.kind === "star") {
+        // 5-point yellow star (hazard)
+        const cx = o.x + o.w / 2;
+        const cy = o.y + o.h / 2;
+        const R = o.w / 2;
+        const r = R * 0.45;
+        const rot = (performance.now() / 600) % (Math.PI * 2);
+        ctx.fillStyle = "hsl(48,95%,60%)";
+        ctx.shadowColor = "hsla(48,95%,60%,0.9)";
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const ang = rot + (i * Math.PI) / 5 - Math.PI / 2;
+          const rr = i % 2 === 0 ? R : r;
+          const x = cx + Math.cos(ang) * rr;
+          const y = cy + Math.sin(ang) * rr;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
       } else if (o.kind === "cloud") {
         ctx.fillStyle = "hsla(0,0%,100%,0.85)";
         ctx.beginPath();
@@ -607,7 +864,6 @@ export class Engine {
         ctx.beginPath();
         ctx.ellipse(o.x + 20, o.y + 14, 14, 8, 0, 0, Math.PI * 2);
         ctx.fill();
-        // wings
         ctx.beginPath();
         ctx.moveTo(o.x + 10, o.y + 12);
         ctx.lineTo(o.x, o.y - 4 + flap);
@@ -620,7 +876,6 @@ export class Engine {
         ctx.lineTo(o.x + 22, o.y + 8);
         ctx.closePath();
         ctx.fill();
-        // beak
         ctx.fillStyle = "hsl(35,90%,55%)";
         ctx.beginPath();
         ctx.moveTo(o.x + 32, o.y + 14);
@@ -629,7 +884,6 @@ export class Engine {
         ctx.closePath();
         ctx.fill();
       } else if (o.kind === "skyhole") {
-        // swirling void
         const cx = o.x + o.w / 2;
         const cy = o.y + o.h / 2;
         const grad = ctx.createRadialGradient(cx, cy, 4, cx, cy, o.w / 2);
@@ -639,11 +893,48 @@ export class Engine {
         ctx.beginPath();
         ctx.ellipse(cx, cy, o.w / 2, o.h / 2, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "hsla(320,80%,70%,0.5)";
+        ctx.strokeStyle = "hsla(320,80%,70%,0.6)";
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.ellipse(cx, cy, o.w / 2 - 2, o.h / 2 - 2, 0, 0, Math.PI * 2);
         ctx.stroke();
+      } else if (o.kind === "portal-land" || o.kind === "portal-sky") {
+        const cx = o.x + o.w / 2;
+        const cy = o.y + o.h / 2;
+        const isLandPortal = o.kind === "portal-land";
+        const innerColor = isLandPortal ? "hsl(48,95%,65%)" : "hsl(200,90%,70%)";
+        const ringColor = isLandPortal ? "hsla(48,95%,65%,0.85)" : "hsla(200,90%,70%,0.85)";
+        const t = performance.now() / 200;
+        // halo
+        const halo = ctx.createRadialGradient(cx, cy, 4, cx, cy, Math.max(o.w, o.h) / 1.4);
+        halo.addColorStop(0, innerColor);
+        halo.addColorStop(0.5, ringColor);
+        halo.addColorStop(1, "hsla(0,0%,0%,0)");
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, o.w / 2 + 6, o.h / 2 + 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // swirling ring
+        ctx.strokeStyle = ringColor;
+        ctx.lineWidth = 3;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.ellipse(
+            cx,
+            cy,
+            o.w / 2 - i * 6,
+            o.h / 2 - i * 6,
+            t + i,
+            0,
+            Math.PI * 2
+          );
+          ctx.stroke();
+        }
+        // label arrow
+        ctx.fillStyle = "hsla(0,0%,100%,0.95)";
+        ctx.font = "bold 12px 'JetBrains Mono', monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(isLandPortal ? "LAND" : "SKY", cx, cy + 4);
       }
       ctx.restore();
     }
@@ -656,7 +947,6 @@ export class Engine {
       ctx.save();
       ctx.translate(f.x, f.y + bob);
 
-      // Glow
       ctx.shadowColor = this.fruitColor(f.kind);
       ctx.shadowBlur = 18;
 
@@ -735,22 +1025,28 @@ export class Engine {
     const w = this.playerWidth();
     const h = this.playerHeight();
 
+    // Invulnerability blink
+    if (this.state.invulnMs > 0) {
+      const t = Math.floor(this.state.invulnMs / 90);
+      if (t % 2 === 0) {
+        // skip drawing this frame to create flicker
+        return;
+      }
+    }
+
     ctx.save();
     ctx.translate(x + w / 2, y + h / 2);
     ctx.rotate(this.bodyTilt);
 
-    if (this.state.mode === "land") {
-      // T-Rex
+    if (isGroundMode(this.state.mode)) {
       const lowG = this.state.lowGravityMs > 0;
       const bodyColor = lowG ? "hsl(140,65%,45%)" : "hsl(140,55%,40%)";
 
-      // Glow if low gravity
       if (lowG) {
         ctx.shadowColor = "hsla(355,80%,55%,0.7)";
         ctx.shadowBlur = 18;
       }
 
-      // Tail
       ctx.fillStyle = bodyColor;
       ctx.beginPath();
       ctx.moveTo(-w / 2 + 4, -2);
@@ -759,34 +1055,26 @@ export class Engine {
       ctx.closePath();
       ctx.fill();
 
-      // Body
       ctx.fillRect(-w / 2 + 4, -h / 2 + 16, w - 12, h - 28);
-      // Head
       ctx.fillRect(w / 2 - 18, -h / 2 + 4, 18, 22);
-      // Snout
       ctx.fillRect(w / 2 - 4, -h / 2 + 14, 8, 8);
 
       ctx.shadowBlur = 0;
-      // Eye
       ctx.fillStyle = "white";
       ctx.fillRect(w / 2 - 12, -h / 2 + 10, 5, 5);
       ctx.fillStyle = "black";
       ctx.fillRect(w / 2 - 10, -h / 2 + 12, 2, 2);
 
-      // Arm
       ctx.fillStyle = bodyColor;
       ctx.fillRect(w / 2 - 22, -2, 6, 3);
 
-      // Legs (animated when on ground)
       const lp = this.onGround ? Math.sin(this.legPhase) * 6 : 0;
       ctx.fillRect(-6, h / 2 - 12, 8, 12 - lp);
       ctx.fillRect(6, h / 2 - 12, 8, 12 + lp);
     } else {
-      // Dragon
       ctx.shadowColor = "hsla(320,80%,70%,0.6)";
       ctx.shadowBlur = 16;
 
-      // Tail
       ctx.fillStyle = "hsl(280,70%,55%)";
       ctx.beginPath();
       ctx.moveTo(-w / 2 + 6, 0);
@@ -795,13 +1083,11 @@ export class Engine {
       ctx.closePath();
       ctx.fill();
 
-      // Body
       ctx.fillStyle = "hsl(290,75%,50%)";
       ctx.beginPath();
       ctx.ellipse(0, 0, w / 2 - 6, h / 2 - 4, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // Wings
       const flap = Math.sin(this.wingPhase) * 10;
       ctx.fillStyle = "hsl(320,70%,60%)";
       ctx.beginPath();
@@ -817,19 +1103,16 @@ export class Engine {
       ctx.closePath();
       ctx.fill();
 
-      // Head
       ctx.fillStyle = "hsl(290,75%,50%)";
       ctx.beginPath();
       ctx.ellipse(w / 2 - 8, -2, 12, 10, 0, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.shadowBlur = 0;
-      // Eye
       ctx.fillStyle = "white";
       ctx.fillRect(w / 2 - 6, -6, 4, 4);
       ctx.fillStyle = "black";
       ctx.fillRect(w / 2 - 5, -5, 2, 2);
-      // Fire breath flicker
       ctx.fillStyle = `hsla(${30 + Math.random() * 20},95%,60%,0.9)`;
       ctx.beginPath();
       ctx.moveTo(w / 2 + 4, -2);
@@ -853,4 +1136,3 @@ export class Engine {
     ctx.globalAlpha = 1;
   }
 }
-
