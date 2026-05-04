@@ -2,95 +2,71 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
-
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Land mode palette - warm sunset */
+    --background: 28 45% 92%;
+    --foreground: 24 30% 15%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 30 40% 96%;
+    --card-foreground: 24 30% 15%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 30 40% 96%;
+    --popover-foreground: 24 30% 15%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 18 85% 55%;
+    --primary-foreground: 30 40% 98%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 35 60% 75%;
+    --secondary-foreground: 24 40% 20%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 30 25% 85%;
+    --muted-foreground: 24 15% 40%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 145 55% 45%;
+    --accent-foreground: 30 40% 98%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 30 40% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 30 25% 80%;
+    --input: 30 25% 80%;
+    --ring: 18 85% 55%;
 
-    --radius: 0.5rem;
+    --radius: 1rem;
 
-    --sidebar-background: 0 0% 98%;
+    /* Game-specific tokens */
+    --land-sky-top: 200 75% 70%;
+    --land-sky-bottom: 30 90% 75%;
+    --land-ground: 32 55% 45%;
+    --land-ground-dark: 28 45% 30%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    --sky-top: 270 70% 35%;
+    --sky-bottom: 320 75% 60%;
 
-    --sidebar-primary: 240 5.9% 10%;
+    --reverse-tint: 280 80% 50%;
 
-    --sidebar-primary-foreground: 0 0% 98%;
+    --apple: 355 80% 55%;
+    --pineapple: 48 95% 55%;
+    --durian: 75 55% 45%;
+    --mushroom: 295 65% 55%;
 
-    --sidebar-accent: 240 4.8% 95.9%;
+    --hud-bg: 24 35% 12%;
+    --hud-fg: 30 40% 96%;
 
-    --sidebar-accent-foreground: 240 5.9% 10%;
+    /* Gradients */
+    --gradient-land: linear-gradient(180deg, hsl(var(--land-sky-top)) 0%, hsl(var(--land-sky-bottom)) 100%);
+    --gradient-sky: linear-gradient(180deg, hsl(var(--sky-top)) 0%, hsl(var(--sky-bottom)) 100%);
+    --gradient-primary: linear-gradient(135deg, hsl(18 85% 55%), hsl(35 95% 60%));
+    --gradient-hud: linear-gradient(180deg, hsl(24 35% 14% / 0.85), hsl(24 35% 10% / 0.85));
 
-    --sidebar-border: 220 13% 91%;
+    /* Shadows */
+    --shadow-arcade: 0 8px 0 hsl(24 30% 15% / 0.25), 0 20px 40px -10px hsl(24 30% 15% / 0.4);
+    --shadow-glow-apple: 0 0 30px hsl(var(--apple) / 0.6);
+    --shadow-glow-pineapple: 0 0 40px hsl(var(--pineapple) / 0.7);
+    --shadow-glow-mushroom: 0 0 30px hsl(var(--mushroom) / 0.6);
 
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --transition-bounce: cubic-bezier(0.68, -0.55, 0.27, 1.55);
   }
 }
 
@@ -101,5 +77,30 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    overflow: hidden;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Bungee', 'Space Grotesk', sans-serif;
+    letter-spacing: 0.02em;
+  }
+
+  .font-mono-game {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .text-shadow-arcade {
+    text-shadow: 0 3px 0 hsl(24 30% 15% / 0.3), 0 6px 12px hsl(24 30% 15% / 0.4);
+  }
+
+  .hud-panel {
+    background: var(--gradient-hud);
+    backdrop-filter: blur(12px);
+    border: 1px solid hsl(var(--hud-fg) / 0.15);
+    box-shadow: var(--shadow-arcade);
   }
 }
